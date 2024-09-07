@@ -237,13 +237,6 @@ async def verify(interaction: discord.Interaction):
     await verify_command(interaction)
 
 
-@greatEagle.hybrid_command(name="test", with_app_command=True, description="Testing")
-@app_commands.guilds(discord.Object(id=GUILD))
-async def test(ctx: commands.Context):
-    await ctx.defer(ephemeral=True)
-    await ctx.reply("hi!")
-
-
 async def restart_login_server(ctx: commands.Context):
     await ctx.defer(ephemeral=True)
     try:
