@@ -1,0 +1,4 @@
+setuptools
+nextcord
+dotenv
+paramiko
