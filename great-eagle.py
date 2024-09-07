@@ -5,17 +5,18 @@ from discord import ui
 import logging
 import os
 import asyncio
-import subprocess
-from dotenv import load_dotenv
+import paramiko
 import re
 import traceback
-import paramiko
+import json
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+os.makedirs('data/logs', exist_ok=True)
+handler = logging.FileHandler(filename='data/logs/discord.log', encoding='utf-8', mode='w')
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logging.basicConfig(level=logging.INFO, handlers=[handler])
@@ -25,22 +26,63 @@ GUILD = os.getenv("GUILD_ID")
 
 # SSH details from environment variables
 SSH_HOST = os.getenv("SSH_HOST")
-SSH_PORT = os.getenv("SSH_PORT") 
+try:
+    SSH_PORT = int(os.getenv("SSH_PORT"))  # Default to port 22 if not provided
+except ValueError:
+    raise ValueError("SSH_PORT must be an integer.")
 SSH_USERNAME = os.getenv("SSH_USERNAME")
-SSH_KEY = os.getenv("SSH_KEY")
+SSH_PASS = os.getenv("SSH_PASS")
+
+
+if not all([TOKEN, GUILD]):
+    raise ValueError("Missing env variables.")
 
 def validate_ssh_config():
-    return all([SSH_HOST, SSH_PORT, SSH_USERNAME, SSH_KEY])
+    return all([SSH_HOST, SSH_PORT, SSH_USERNAME, SSH_PASS])
     
 SSH_CONFIG_VALID = validate_ssh_config()
 
-# Main Class
+# Load user attempts from file
+def load_user_attempts():
+    file_path = 'data/user_attempts.json'
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    return {}
 
+# Save user attempts to file
+def save_user_attempts(user_attempts):
+    file_path = 'data/user_attempts.json'
+    with open(file_path, 'w') as f:
+        json.dump(user_attempts, f)
+
+# Main Class
 class GreatEagle(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
+        self.ssh_semaphore = asyncio.Semaphore(1)
+        self.user_attempts = load_user_attempts()
+
+    async def execute_ssh_command(self, command):
+        logging.info(f"Executing SSH command: {command}")
+        async with self.ssh_semaphore:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, password=SSH_PASS)
+                stdin, stdout, stderr = ssh.exec_command(command)
+                exit_status = stdout.channel.recv_exit_status()
+                stdout_lines = stdout.readlines()
+                stderr_lines = stderr.readlines()
+                logging.info(f"SSH command output: {''.join(stdout_lines)}")
+                if stderr_lines:
+                    logging.error(f"SSH command error: {''.join(stderr_lines)}")
+                return exit_status, stdout_lines, stderr_lines
+            finally:
+                ssh.close()
+
         
     async def setup_hook(self):
         await self.tree.sync(guild=discord.Object(id=GUILD))
@@ -50,10 +92,10 @@ class GreatEagle(commands.Bot):
         logging.error(f"Command error: {error}")
         await ctx.send(f"An error occurred: {error}", ephemeral=True)
 
+# Instantiate the bot
+greatEagle = GreatEagle()
+
 # Modal Classes
-
-# docker exec -t loginserver ls /data > /dev/null 2>&1 && echo 1 || echo 0
-
 class VerifyModal(discord.ui.Modal, title="Verify Account for the PUG login server"):
     answer = ui.TextInput(
         label="Username",
@@ -63,7 +105,26 @@ class VerifyModal(discord.ui.Modal, title="Verify Account for the PUG login serv
         max_length=9
     )
 
+    def __init__(self, bot):
+        super().__init__()
+        self.bot = bot  # Store the bot instance
+
     async def on_submit(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+
+        # Initialize user attempts if not already present
+        if user_id not in self.bot.user_attempts:
+            self.bot.user_attempts[user_id] = 0
+
+        # Check if the user has exceeded the limit
+        if self.bot.user_attempts[user_id] >= 5 and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You have reached the maximum number of attempts. Contact an admin if you need further assistance.", ephemeral=True)
+            return
+        
+        # Increment the user's attempt count
+        self.bot.user_attempts[user_id] += 1
+        save_user_attempts(self.bot.user_attempts)
+
         await interaction.response.defer(ephemeral=True)
         username = self.answer.value
         
@@ -78,33 +139,20 @@ class VerifyModal(discord.ui.Modal, title="Verify Account for the PUG login serv
             return
 
         try:
-            # Create and use an SSH client context manager for better resource management
-            async with asyncio.Semaphore(1):  # Limit the number of concurrent SSH connections
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
-                # Connect to the remote server
-                ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, password=SSH_KEY)
-                
-                # Construct the Docker command
-                command = f"docker exec loginserver python3 taserver/getauthcode.py {username} {username}"
-                
-                # Execute the Docker command
-                stdin, stdout, stderr = ssh.exec_command(command)
-                exit_status = stdout.channel.recv_exit_status()  # Wait for command to complete
-                
-                # Capture and handle command output
-                stdout_lines = stdout.readlines()
-                stderr_lines = stderr.readlines()
-                ssh.close()
-                
-                if exit_status == 0:
-                    verification_code = stdout_lines[0].strip() if stdout_lines else "No output from script"
+            exit_status, stdout_lines, stderr_lines = await self.bot.execute_ssh_command(f"docker exec loginserver python3 taserver/getauthcode.py {username} {username}")
+            
+            if exit_status == 0:
+                output = ''.join(stdout_lines).strip()
+                if output.startswith("The specified"):
+                    logging.info(f"Verification failed for {username}: {output}")
+                    await interaction.followup.send('Verification failed: The specified email address does not match the one stored for the account.', ephemeral=True)
+                else:
+                    verification_code = output if output else "No output from script"
                     logging.info(f"Generated verification code for {username}: {verification_code}")
                     await interaction.followup.send(f'Thanks for verifying, your code is: {verification_code}', ephemeral=True)
-                else:
-                    logging.error(f"Script error: {''.join(stderr_lines)}")
-                    await interaction.followup.send('Oops, something went wrong with the verification process.', ephemeral=True)
+            else:
+                logging.error(f"Script error: {''.join(stderr_lines)}")
+                await interaction.followup.send('Oops, something went wrong with the verification process.', ephemeral=True)
 
         except paramiko.SSHException as e:
             logging.error(f"SSH connection error: {e}")
@@ -113,77 +161,56 @@ class VerifyModal(discord.ui.Modal, title="Verify Account for the PUG login serv
             logging.error(f"Unexpected error: {e}")
             await interaction.followup.send('Oops, something went wrong!', ephemeral=True)
 
-        await asyncio.sleep(4)  # Optional: simulate processing delay
-
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logging.error(f"Modal error: {error}")
         await interaction.followup.send('Oops, something went wrong!', ephemeral=True)
         traceback.print_exception(type(error), error, error.__traceback__)
 
-# The ritual to spawn our great leader
-greatEagle = GreatEagle()
-
-# Modals
-if SSH_CONFIG_VALID:
-    @greatEagle.tree.command(guild=discord.Object(id = GUILD), description="Submit verification")
-    async def verify(interaction: discord.Interaction):
-        await interaction.response.send_modal(VerifyModal())
-else:
-    @greatEagle.tree.command(guild=discord.Object(id = GUILD), description="Submit verification")
-    async def verify(interaction: discord.Interaction):
+# Commands and Modals
+async def verify_command(interaction: discord.Interaction):
+    if SSH_CONFIG_VALID:
+        await interaction.response.send_modal(VerifyModal(bot=greatEagle))
+    else:
         await interaction.response.send_message("Command not available due to missing or incorrect configuration.", ephemeral=True)
 
-# Hybrid Commands
+@greatEagle.tree.command(guild=discord.Object(id=GUILD), description="Submit verification")
+async def verify(interaction: discord.Interaction):
+    await verify_command(interaction)
 
-@greatEagle.hybrid_command(name = "test", with_app_command = True, description = "Testing")
-@app_commands.guilds(discord.Object(id = GUILD))
+
+@greatEagle.hybrid_command(name="test", with_app_command=True, description="Testing")
+@app_commands.guilds(discord.Object(id=GUILD))
 async def test(ctx: commands.Context):
-    await ctx.defer(ephemeral = True)
+    await ctx.defer(ephemeral=True)
     await ctx.reply("hi!")
+
+async def restart_login_server(ctx: commands.Context):
+    await ctx.defer(ephemeral=True)
+    try:
+        exit_status, stdout_lines, stderr_lines = await greatEagle.execute_ssh_command("docker restart loginserver")
+        logging.info(f"Command output: {''.join(stdout_lines)}")
+        if stderr_lines:
+            logging.error(f"Command error: {''.join(stderr_lines)}")
+        
+        if exit_status == 0:
+            await ctx.reply("The login server is being restarted. Please wait a moment for it to come back online.")
+        else:
+            await ctx.reply("Failed to restart the login server. Please check the logs for more details.")
+    except Exception as e:
+        logging.error(f"Unexpected error while restarting the server: {e}")
+        await ctx.reply("An unexpected error occurred while attempting to restart the login server.")
 
 if SSH_CONFIG_VALID:
     @greatEagle.hybrid_command(name="restartloginserver", with_app_command=True, description="Restart the PUG Login Server")
     @app_commands.guilds(discord.Object(id=GUILD))
     @commands.has_permissions(administrator=True)
     async def restartloginserver(ctx: commands.Context):
-        await ctx.defer(ephemeral=True)
-
-        try:
-            # Create an SSH client
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Connect to the remote server
-            ssh.connect(SSH_HOST, port=int(SSH_PORT), username=SSH_USERNAME, password=SSH_KEY)
-
-            # Run the Docker restart command
-            stdin, stdout, stderr = ssh.exec_command("docker restart loginserver")
-            exit_status = stdout.channel.recv_exit_status()  # Wait for command to complete
-            
-            # Log output and errors
-            stdout_lines = stdout.readlines()
-            stderr_lines = stderr.readlines()
-            logging.info(f"Command output: {''.join(stdout_lines)}")
-            logging.error(f"Command error: {''.join(stderr_lines)}" if stderr_lines else "No errors")
-            
-            if exit_status == 0:
-                await ctx.reply("The login server Docker container is being restarted. Please wait a moment for it to come back online.")
-            else:
-                await ctx.reply("Failed to restart the login server Docker container. Please check the logs for more details.")
-            
-        except Exception as e:
-            logging.error(f"SSH error: {e}")
-            await ctx.reply("An unexpected error occurred while attempting to restart the Docker container.")
-
-        finally:
-            ssh.close()
+        await restart_login_server(ctx)
 else:
-    # Define a placeholder command or handle the case where SSH config is invalid
     @greatEagle.hybrid_command(name="restartloginserver", with_app_command=True, description="Restart the PUG Login Server")
     @app_commands.guilds(discord.Object(id=GUILD))
     @commands.has_permissions(administrator=True)
     async def restartloginserver(ctx: commands.Context):
         await ctx.reply("Command not available due to missing or incorrect configuration.", ephemeral=True)
-
 
 greatEagle.run(TOKEN, log_handler=handler)

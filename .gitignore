@@ -1,6 +1,7 @@
 # tribes-server-helper
 helper-bot.log
 bot-env
+data/user_attempts.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
