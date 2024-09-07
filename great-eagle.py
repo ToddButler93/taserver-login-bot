@@ -35,7 +35,7 @@ SSH_USERNAME = os.getenv("SSH_USERNAME")
 SSH_PASS = os.getenv("SSH_PASS")
 
 
-if not all([TOKEN, GUILD]):
+if not all([TOKEN, GUILD, NOTIFY_CHANNEL_ID]):
     raise ValueError("Missing env variables.")
 
 
@@ -325,6 +325,59 @@ async def reset_user_limit(ctx: commands.Context, user: discord.User):
 @commands.has_permissions(administrator=True)
 async def resetuserlimit(ctx: commands.Context, user: discord.User):
     await reset_user_limit(ctx, user)
+
+
+class InstallView(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        # Add a button to the view
+        self.add_item(
+            discord.ui.Button(
+                label="Download TA Launcher V2",
+                style=discord.ButtonStyle.success,  # Green button
+                url="https://github.com/Dylan-B-D/ta-launcher/releases/latest",
+            )
+        )
+        self.add_item(
+            discord.ui.Button(
+                label="How to Play",
+                style=discord.ButtonStyle.url,  # Green button
+                url="https://www.dodgesdomain.com/docs/gameplay/guide-quick",
+            )
+        )
+
+
+@greatEagle.tree.command(
+    guild=discord.Object(id=GUILD),
+    name="tribesinstall",
+    description="Get a link to download the TA Launcher V2",
+)
+async def tribesinstall(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="Tribes Ascend Installation",
+        description="Download TA Launcher V2 below. It will guide you through the entire install process.",
+        color=int("00AA95", 16),  # Green color
+    )
+    # Add a thumbnail
+    embed.set_thumbnail(
+        url="https://utfs.io/f/e45e1d6b-5545-4080-ab99-2bdf3235e8c2-sedzba.png"
+    )
+    # Add fields to the embed
+    embed.add_field(
+        name="Verify",
+        value="After logging into the PUG login server, you can use the /verify command with this bot to verify your account.",
+        inline=False,
+    )
+
+    # Add an image to the embed
+    embed.set_image(
+        url="https://utfs.io/f/99f42db1-4d19-496a-9168-472d01d6327c-2cr5.jpg"
+    )
+
+    # Add a footer
+    embed.set_footer(text="Select an option from the dropdown menu for more help.")
+
+    await interaction.response.send_message(embed=embed, view=InstallView())
 
 
 greatEagle.run(TOKEN, log_handler=handler)
