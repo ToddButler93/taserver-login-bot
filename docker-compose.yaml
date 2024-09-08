@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  great-eagle:
+    container_name: great-eagle
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

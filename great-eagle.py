@@ -128,7 +128,8 @@ class VerifyModal(discord.ui.Modal, title="Verify Account for the PUG login serv
         # Check if the user has exceeded the limit
         if (
             self.bot.user_attempts[user_name] >= 5
-        ):  # and not interaction.user.guild_permissions.administrator:
+            and not interaction.user.guild_permissions.administrator
+        ):
             if NOTIFY_CHANNEL_ID:
                 channel = self.bot.get_channel(NOTIFY_CHANNEL_ID)
                 if channel:

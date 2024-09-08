@@ -22,7 +22,7 @@ Follow [here](https://discordpy.readthedocs.io/en/stable/discord.html) and [here
 ## Setup
 
 ```bash
-wget -O update.sh "<https://raw.githubusercontent.com/ToddButler93/tribes-login-bot/main/update.sh>"
+wget -O update.sh "https://raw.githubusercontent.com/ToddButler93/taserver-login-bot/main/update.sh"
 chmod +x update.sh
 ./update.sh
 ```
