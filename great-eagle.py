@@ -101,7 +101,6 @@ class GreatEagle(commands.Bot):
 
     async def on_command_error(self, ctx, error):
         logging.error(f"Command error: {error}")
-        await ctx.send(f"An error occurred: {error}", ephemeral=True)
 
 
 # Instantiate the bot
