@@ -1,5 +1,4 @@
-version: "3.8"
-
+# great-eagle docker compose
 services:
   great-eagle:
     container_name: great-eagle
