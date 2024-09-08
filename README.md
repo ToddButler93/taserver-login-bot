@@ -21,6 +21,12 @@ Follow [here](https://discordpy.readthedocs.io/en/stable/discord.html) and [here
 
 ## Setup
 
+```bash
+wget -O update.sh "<https://raw.githubusercontent.com/ToddButler93/tribes-login-bot/main/update.sh>"
+chmod +x update.sh
+./update.sh
+```
+
 ### Creating a Virtual Environment
 
 1. **Create the Virtual Environment:**
@@ -76,6 +82,18 @@ To start the bot, use the following command:
 
 ```bash
 python great-eagle.py
+```
+
+### Docker
+
+```bash
+docker build -t great-eagle.py .
+```
+
+- The following command mounts data and .env in the current directory.
+
+```bash
+docker run --rm -v "$(pwd)/data:/app/data" -v "$(pwd)/.env:/app/.env" great-eagle.py
 ```
 
 ## Commands

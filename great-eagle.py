@@ -375,7 +375,9 @@ async def tribesinstall(interaction: discord.Interaction):
     )
 
     # Add a footer
-    embed.set_footer(text="Select an option from the dropdown menu for more help.")
+    embed.set_footer(
+        text="Don't be afraid to ask for help, we are always excited to have more players!"
+    )
 
     await interaction.response.send_message(embed=embed, view=InstallView())
 
