@@ -92,6 +92,7 @@ class GreatEagle(commands.Bot):
                 ssh.close()
 
     async def setup_hook(self):
+        await self.tree.clear_commands(guild=discord.Object(id=GUILD))
         await self.tree.sync(guild=discord.Object(id=GUILD))
         logging.info(f"Synced slash commands for {self.user}.")
 
