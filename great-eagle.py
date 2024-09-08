@@ -92,9 +92,12 @@ class GreatEagle(commands.Bot):
                 ssh.close()
 
     async def setup_hook(self):
-        await self.tree.clear_commands(guild=discord.Object(id=GUILD))
+        # Ensure self.tree is initialized
+        if self.tree is None:
+            raise RuntimeError("self.tree is not initialized.")
+        await self.tree.sync()
         await self.tree.sync(guild=discord.Object(id=GUILD))
-        logging.info(f"Synced slash commands for {self.user}.")
+        logging.info(f"Cleared and synced slash commands for {self.user}.")
 
     async def on_command_error(self, ctx, error):
         logging.error(f"Command error: {error}")

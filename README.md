@@ -87,13 +87,13 @@ python great-eagle.py
 ### Docker
 
 ```bash
-docker build -t great-eagle.py .
+docker build -t great-eagle .
 ```
 
 - The following command mounts data and .env in the current directory.
 
 ```bash
-docker run --rm -v "$(pwd)/data:/app/data" -v "$(pwd)/.env:/app/.env" great-eagle.py
+docker run --rm -v "$(pwd)/data:/app/data" -v "$(pwd)/.env:/app/.env" great-eagle
 ```
 
 ## Commands
